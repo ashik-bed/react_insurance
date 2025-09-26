@@ -96,10 +96,10 @@ db = load_data()
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Default admin - ensure it's created if missing
-if "ASHIK" not in db["users"]:
-    hashed_pw = hash_password("ASHph7#")
-    db["users"]["ASHIK"] = {
-        "username": "ASHIK",
+if "ADMIN" not in db["users"]:
+    hashed_pw = hash_password("ADMIN123#")
+    db["users"]["ADMIN"] = {
+        "username": "ADMIN",
         "password": hashed_pw,
         "role": "admin",
         "assigned_branches": [],
