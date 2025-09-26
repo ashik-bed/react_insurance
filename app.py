@@ -1,535 +1,808 @@
-import React, { useState, useEffect } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+# ---------------------------
+# IMPORTS
+# ---------------------------
+import streamlit as st
+import json
+import os
+from datetime import datetime
+import bcrypt
+import matplotlib.pyplot as plt
 
-// -------------------
-// Types
-// -------------------
-type UserRole = "admin" | "AGM" | "manager" | "branch";
+# ---------------------------
+# CONFIG (must be FIRST Streamlit call, only once)
+# ---------------------------
+st.set_page_config(
+    page_title="CRM System",   # use global system title
+    page_icon="💼",            # main system icon
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-interface User {
-  username: string;
-  password_b64: string;
-  role: UserRole;
-  assigned_branches: string[];
-  created_by: string;
-  created_at: string;
+# ---------------------------
+# DEBUG
+# ---------------------------
+DEBUG = True
+if DEBUG:
+    st.info("🔧 Debug: Login page loaded in login pager")
+
+# ---------------------------
+# LOGIN PAGE (example layout)
+# ---------------------------
+col1, col2 = st.columns([1, 1], gap="large")
+
+with col1:
+    st.markdown("## 🔒 Sign In")   # keep login page look with lock icon
+    username = st.text_input("Username", placeholder="Enter username")
+    password = st.text_input("Password", type="password", placeholder="Enter password")
+    st.button("Sign In")
+
+with col2:
+    st.markdown("## CRM System")
+    st.write("Welcome to CRM System. Please login to continue.")
+    st.caption("Secure customer relationship management platform")
+
+# ---------------------------
+# REST OF YOUR FUNCTIONS / LOGIC
+# ---------------------------
+# (no need to touch them — they will work as before)
+
+# ---------------------------
+# CONFIG
+# ---------------------------
+DATA_FILE = "crm_data.json"
+UPLOAD_DIR = "uploads"
+
+st.set_page_config(
+    page_title="CRM System",
+    page_icon="💼",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ---------------------------
+# HELPERS
+# ---------------------------
+@st.cache_data
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            st.error("Error loading data file. Starting with fresh data.")
+            return {
+                "users": {},
+                "customers": {},
+                "dashboard": {"text": "Welcome to CRM System. Please login to continue.", "image_path": None},
+            }
+    return {
+        "users": {},
+        "customers": {},
+        "dashboard": {"text": "Welcome to CRM System. Please login to continue.", "image_path": None},
+    }
+
+
+def save_data(data):
+    try:
+        # json.dump signature expects (obj, file, ...). Fixed from your original.
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        # Clear the cache so load_data returns fresh content next time
+        try:
+            st.cache_data.clear()
+        except Exception:
+            # If Streamlit version doesn't support this API, ignore silently
+            pass
+        return True
+    except Exception as e:
+        st.error(f"Error saving data: {e}")
+        return False
+
+
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+
+def check_password(pw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def generate_customer_id():
+    return f"CUST-{int(datetime.now().timestamp())}"
+
+
+# ---------------------------
+# STATUS LABELS (Updated with lighter colors)
+# ---------------------------
+status_labels = {
+    "submitted": ("🔴 Submitted", "#ff6b6b"),
+    "approved_by_area_manager": ("🟡 Area Manager Approved", "#ffd93d"),
+    "approved_by_agm": ("🟢 AGM Approved", "#6bcf7f"),
 }
 
-interface Customer {
-  customer_id: string;
-  name: string;
-  phone: string;
-  aadhaar_number: string;
-  email: string;
-  branch: string;
-  submitted_by: string;
-  status: "submitted" | "approved_by_manager" | "approved_by_agm";
-  document_path: string;
-  created_at: string;
-  updated_at: string;
-}
+# ---------------------------
+# INITIAL DATA & FOLDERS
+# ---------------------------
+db = load_data()
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-interface DashboardContent {
-  text: string;
-  image_path: string | null;
-}
-
-// -------------------
-// Helpers
-// -------------------
-const hashPassword = (pw: string) => btoa(pw);
-const checkPassword = (pw: string, hashed: string) => btoa(pw) === hashed;
-
-const generateCustomerId = () => {
-  const ts = new Date().getTime();
-  const rnd = Math.floor(Math.random() * 1000)
-    .toString()
-    .padStart(3, "0");
-  return `CUST-${ts}${rnd}`;
-};
-
-const statusLabels = {
-  submitted: { text: "Submitted", color: "text-red-600", icon: "🔴" },
-  approved_by_manager: {
-    text: "Manager Approved",
-    color: "text-yellow-600",
-    icon: "🟡",
-  },
-  approved_by_agm: {
-    text: "AGM Approved",
-    color: "text-green-600",
-    icon: "🟢",
-  },
-};
-
-// -------------------
-// Main Component
-// -------------------
-const CRMApp: React.FC = () => {
-  const [users, setUsers] = useState<Record<string, User>>({});
-  const [customers, setCustomers] = useState<Record<string, Customer>>({});
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activePage, setActivePage] = useState<string | null>(null);
-  const [dashboardContent, setDashboardContent] = useState<DashboardContent>({
-    text: "Welcome to CRM System. Please login to continue.",
-    image_path: null,
-  });
-
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [newUserForm, setNewUserForm] = useState({
-    username: "",
-    password: "",
-    assignedBranches: "",
-    role: "AGM" as UserRole,
-  });
-  const [customerForm, setCustomerForm] = useState({
-    name: "",
-    phone: "",
-    aadhaar: "",
-    email: "",
-    file: null as File | null,
-  });
-  const [searchText, setSearchText] = useState("");
-
-  // -------------------
-  // Persistence
-  // -------------------
-  useEffect(() => {
-    const savedUsers = localStorage.getItem("crm_users");
-    const savedCustomers = localStorage.getItem("crm_customers");
-    const savedDashboard = localStorage.getItem("crm_dashboard");
-
-    if (savedUsers) setUsers(JSON.parse(savedUsers));
-    if (savedCustomers) setCustomers(JSON.parse(savedCustomers));
-    if (savedDashboard) setDashboardContent(JSON.parse(savedDashboard));
-  }, []);
-
-  useEffect(() => localStorage.setItem("crm_users", JSON.stringify(users)), [users]);
-  useEffect(() => localStorage.setItem("crm_customers", JSON.stringify(customers)), [customers]);
-  useEffect(() => localStorage.setItem("crm_dashboard", JSON.stringify(dashboardContent)), [dashboardContent]);
-
-  // -------------------
-  // Initial Admin User
-  // -------------------
-  useEffect(() => {
-    if (!users.ASHIK) {
-      const adminUser: User = {
-        username: "ASHIK",
-        password_b64: btoa("ASHph7#"),
-        role: "admin",
-        assigned_branches: [],
-        created_by: "system",
-        created_at: new Date().toISOString(),
-      };
-      setUsers((prev) => ({ ...prev, ASHIK: adminUser }));
+# Default admin - ensure it's created if missing
+if "ASHIK" not in db["users"]:
+    hashed_pw = hash_password("ASHph7#")
+    db["users"]["ASHIK"] = {
+        "username": "ASHIK",
+        "password": hashed_pw,
+        "role": "admin",
+        "assigned_branches": [],
+        "created_by": "system",
+        "created_at": str(datetime.now()),
     }
-  }, [users]);
+    save_data(db)
 
-  // -------------------
-  // Auth
-  // -------------------
-  const handleLogin = () => {
-    const user = users[loginForm.username];
-    if (user && checkPassword(loginForm.password, user.password_b64)) {
-      setLoggedIn(true);
-      setCurrentUser(user);
-      setActivePage(null);
-    } else {
-      alert("Invalid credentials. Please try again.");
+# ---------------------------
+# SESSION STATE
+# ---------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# ---------------------------
+# CUSTOM CSS FOR PROFESSIONAL UI (Lighter Colors: Blues and Grays)
+# ---------------------------
+def apply_custom_css():
+    st.markdown("""
+    <style>
+    /* Global Fonts and Colors - Professional Light Theme */
+    html, body, [class*="css"] { 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
     }
-  };
-
-  const handleLogout = () => {
-    setLoggedIn(false);
-    setCurrentUser(null);
-    setActivePage(null);
-  };
-
-  // -------------------
-  // User Management
-  // -------------------
-  const createUser = () => {
-    if (!newUserForm.username.trim()) return alert("Username is required");
-    if (users[newUserForm.username]) return alert("Username already exists");
-    if (newUserForm.password.length < 6)
-      return alert("Password must be at least 6 characters");
-
-    const branches = newUserForm.assignedBranches
-      .split(",")
-      .map((b) => b.trim())
-      .filter(Boolean);
-
-    const newUser: User = {
-      username: newUserForm.username,
-      password_b64: hashPassword(newUserForm.password),
-      role: newUserForm.role,
-      assigned_branches: branches,
-      created_by: currentUser?.username || "system",
-      created_at: new Date().toISOString(),
-    };
-
-    setUsers((prev) => ({ ...prev, [newUser.username]: newUser }));
-    setNewUserForm({ username: "", password: "", assignedBranches: "", role: "AGM" });
-    alert("User created successfully");
-  };
-
-  // -------------------
-  // Customer Management
-  // -------------------
-  const addCustomer = () => {
-    if (!customerForm.name || !customerForm.phone || !customerForm.aadhaar || !customerForm.file)
-      return alert("All fields are required");
-    if (!/^\d{10}$/.test(customerForm.phone)) return alert("Phone number must be 10 digits");
-    if (!/^\d{12}$/.test(customerForm.aadhaar)) return alert("Aadhaar must be 12 digits");
-    if (customerForm.email && !customerForm.email.includes("@")) return alert("Invalid email");
-
-    const customerId = generateCustomerId();
-    const branch = currentUser?.assigned_branches[0] || currentUser?.username || "";
-
-    const newCustomer: Customer = {
-      customer_id: customerId,
-      name: customerForm.name,
-      phone: customerForm.phone,
-      aadhaar_number: customerForm.aadhaar,
-      email: customerForm.email,
-      branch,
-      submitted_by: currentUser?.username || "",
-      status: "submitted",
-      document_path: URL.createObjectURL(customerForm.file),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    setCustomers((prev) => ({ ...prev, [customerId]: newCustomer }));
-    setCustomerForm({ name: "", phone: "", aadhaar: "", email: "", file: null });
-    alert("Customer submitted successfully");
-  };
-
-  const updateCustomerStatus = (id: string, status: Customer["status"]) => {
-    setCustomers((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], status, updated_at: new Date().toISOString() },
-    }));
-  };
-
-  const deleteCustomer = (id: string) => {
-    setCustomers((prev) => {
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
-  };
-
-  const getCustomersForUser = () => {
-    let list = Object.values(customers);
-
-    if (searchText) {
-      list = list.filter(
-        (c) =>
-          c.name.toLowerCase().includes(searchText.toLowerCase()) ||
-          c.customer_id.toLowerCase().includes(searchText.toLowerCase())
-      );
+    .stApp { 
+        background-color: #f8fafc; 
     }
 
-    if (currentUser?.role === "branch") {
-      list = list.filter((c) => c.submitted_by === currentUser.username);
-    } else if (currentUser?.role === "manager") {
-      list = list.filter((c) => currentUser.assigned_branches.includes(c.branch));
+    /* Sidebar Styling - Light Blue Gradient */
+    section[data-testid="stSidebar"] { 
+        background: linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%); 
+        color: #334155; 
+        padding: 1rem;
+    }
+    section[data-testid="stSidebar"] .css-1d391kg, 
+    section[data-testid="stSidebar"] .css-qrbaxs { 
+        color: #334155 !important; 
+    }
+    section[data-testid="stSidebar"] h1 {
+        color: #1e293b;
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
     }
 
-    return list;
-  };
+    /* Button Styling - Professional Blue */
+    div.stButton > button { 
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); 
+        color: white; 
+        border-radius: 8px; 
+        border: none; 
+        padding: 0.75em 1.5em; 
+        font-weight: 600; 
+        font-size: 14px;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    div.stButton > button:hover { 
+        background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%); 
+        color: white; 
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    div.stButton > button:active {
+        transform: translateY(0);
+    }
 
-  // -------------------
-  // Views
-  // -------------------
-  if (!loggedIn) {
-    return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-center text-maroon mb-8">DASHBOARD</h1>
+    /* Input and Select Styling */
+    input, textarea, select { 
+        border-radius: 8px !important; 
+        border: 2px solid #e2e8f0 !important; 
+        padding: 0.75em !important; 
+        font-size: 14px;
+        transition: border-color 0.3s ease;
+        background-color: #ffffff;
+    }
+    input:focus, textarea:focus, select:focus {
+        border-color: #3b82f6 !important;
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
 
-          {dashboardContent.image_path && (
-            <img
-              src={dashboardContent.image_path}
-              alt="CRM Dashboard Banner"
-              className="w-full h-auto rounded-lg mb-6"
-            />
-          )}
+    /* Expander Styling */
+    .streamlit-expanderHeader { 
+        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important; 
+        font-weight: 600; 
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        padding: 0.75em;
+    }
 
-          <Card className="max-w-md mx-auto">
-            <CardHeader>
-              <CardTitle className="text-center">Login</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  placeholder="Enter username"
-                  value={loginForm.username}
-                  onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Enter password"
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                />
-              </div>
-              <Button className="w-full" onClick={handleLogin}>
-                Login
-              </Button>
-            </CardContent>
-          </Card>
+    /* Headers - Dark Blue/Gray */
+    h1, h2, h3 { 
+        color: #1e293b; 
+        font-weight: 700;
+    }
+    h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 2rem; margin-bottom: 0.5rem; }
+    h3 { font-size: 1.5rem; margin-bottom: 0.5rem; }
 
-          <p className="text-center mt-6 text-muted-foreground">{dashboardContent.text}</p>
-        </div>
-      </div>
-    );
-  }
+    /* Success/Error/Warning Messages - Lighter */
+    .stSuccess { background-color: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; }
+    .stError { background-color: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+    .stWarning { background-color: #fefce8; border: 1px solid #fef08a; color: #a16207; }
 
-  const menuOptions =
-    currentUser?.role === "branch"
-      ? ["Submit Customer", "Customer Records"]
-      : ["Create User", "Customer Records", ...(currentUser.role === "admin" ? ["Admin Settings"] : [])];
+    /* Metrics and Info */
+    .stMetric { font-size: 1.2rem; }
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-primary text-primary-foreground p-4">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold">DASHBOARD</h1>
-          <div className="flex items-center space-x-4">
-            <Avatar>
-              <AvatarFallback>{currentUser?.username.charAt(0)}</AvatarFallback>
-            </Avatar>
-            <span>{currentUser?.username} | {currentUser?.role}</span>
-            <Button variant="ghost" onClick={handleLogout}>➜</Button>
-          </div>
-        </div>
-      </header>
+    /* Container Padding */
+    .block-container { padding-top: 2rem; }
+    </style>
+    """, unsafe_allow_html=True)
 
-      {/* Navigation */}
-      <nav className="bg-muted p-4">
-        <div className="max-w-6xl mx-auto flex space-x-4">
-          {menuOptions.map((opt) => (
-            <Button
-              key={opt}
-              variant={activePage === opt ? "default" : "outline"}
-              onClick={() => setActivePage(opt)}
-            >
-              {opt}
-            </Button>
-          ))}
-        </div>
-      </nav>
 
-      {/* Pages */}
-      <main className="max-w-6xl mx-auto p-4 space-y-6">
-        {/* Create User */}
-        {activePage === "Create User" && ["admin", "AGM", "manager"].includes(currentUser!.role) && (
-          <Card>
-            <CardHeader><CardTitle>Create User</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Username</Label>
-                  <Input
-                    value={newUserForm.username}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, username: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label>Password</Label>
-                  <Input
-                    type="password"
-                    value={newUserForm.password}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
-                  />
-                </div>
-              </div>
+apply_custom_css()
 
-              {currentUser?.role !== "branch" && (
-                <div>
-                  <Label>Assign Branches (comma separated)</Label>
-                  <Input
-                    value={newUserForm.assignedBranches}
-                    onChange={(e) =>
-                      setNewUserForm({ ...newUserForm, assignedBranches: e.target.value })
-                    }
-                  />
-                </div>
-              )}
+# ---------------------------
+# LOGIN PAGE (Fixed: Native Streamlit Login, Professional Light Design)
+# ---------------------------
+def login_page():
+    # Debug: Confirm function runs
+    st.write("Debug: Login page loaded")  # Remove after testing
 
-              <div>
-                <Label>Role</Label>
-                <Select
-                  value={newUserForm.role}
-                  onValueChange={(v) => setNewUserForm({ ...newUserForm, role: v as UserRole })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="AGM">AGM</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="branch">Branch</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+    db_local = load_data()  # Fresh load
 
-              <Button onClick={createUser}>Create User</Button>
-            </CardContent>
-          </Card>
-        )}
+    dashboard_text = db_local["dashboard"].get("text", "Welcome to CRM System. Please login to continue.")
+    dashboard_img = db_local["dashboard"].get("image_path", "")
 
-        {/* Submit Customer */}
-        {activePage === "Submit Customer" && currentUser?.role === "branch" && (
-          <Card>
-            <CardHeader><CardTitle>Submit Customer</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input placeholder="Name" value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} />
-                <Input placeholder="Phone" value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} />
-                <Input placeholder="Aadhaar" value={customerForm.aadhaar} onChange={(e) => setCustomerForm({ ...customerForm, aadhaar: e.target.value })} />
-                <Input placeholder="Email" value={customerForm.email} onChange={(e) => setCustomerForm({ ...customerForm, email: e.target.value })} />
-              </div>
-              <Input type="file" onChange={(e) => setCustomerForm({ ...customerForm, file: e.target.files?.[0] || null })} />
-              <Button onClick={addCustomer}>Submit</Button>
-            </CardContent>
-          </Card>
-        )}
+    # Professional light login layout
+    st.markdown(
+        """
+        <style>
+        .login-container {
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .login-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            padding: 3rem;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .login-header {
+            color: #1e293b;
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 2rem;
+        }
+        .login-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+        .login-btn:hover {
+            background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+        .hint-text {
+            color: #64748b;
+            font-size: 14px;
+            margin-top: 1rem;
+        }
+        .dashboard-panel {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            padding: 3rem;
+            width: 100%;
+            max-width: 500px;
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        .dashboard-text {
+            color: #475569;
+            font-size: 16px;
+            line-height: 1.6;
+            margin: 1rem 0;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
-        {/* Customer Records */}
-        {activePage === "Customer Records" && (
-          <Card>
-            <CardHeader className="flex flex-col md:flex-row md:justify-between items-start md:items-center space-y-2 md:space-y-0">
-              <CardTitle>Customer Records</CardTitle>
-              <Input
-                placeholder="Search by Name or ID"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className="max-w-sm"
-              />
-            </CardHeader>
-            <CardContent>
-              {getCustomersForUser().length ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full table-auto border-collapse">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="p-2 text-left">ID</th>
-                        <th className="p-2 text-left">Name</th>
-                        <th className="p-2 text-left">Phone</th>
-                        <th className="p-2 text-left">Aadhaar</th>
-                        <th className="p-2 text-left">Email</th>
-                        <th className="p-2 text-left">Branch</th>
-                        <th className="p-2 text-left">Status</th>
-                        <th className="p-2 text-left">Document</th>
-                        <th className="p-2 text-left">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {getCustomersForUser().map((c) => (
-                        <tr key={c.customer_id} className="border-b">
-                          <td className="p-2">{c.customer_id}</td>
-                          <td className="p-2">{c.name}</td>
-                          <td className="p-2">{c.phone}</td>
-                          <td className="p-2">{c.aadhaar_number}</td>
-                          <td className="p-2">{c.email}</td>
-                          <td className="p-2">{c.branch}</td>
-                          <td className={`p-2 ${statusLabels[c.status].color}`}>
-                            {statusLabels[c.status].icon} {statusLabels[c.status].text}
-                          </td>
-                          <td className="p-2">
-                            {c.document_path && (
-                              <a href={c.document_path} download className="text-blue-600 hover:underline">📄 Download</a>
-                            )}
-                          </td>
-                          <td className="p-2 space-x-2">
-                            {c.status === "submitted" && currentUser?.role === "manager" && (
-                              <Button size="sm" onClick={() => updateCustomerStatus(c.customer_id, "approved_by_manager")}>Approve</Button>
-                            )}
-                            {c.status === "approved_by_manager" && currentUser?.role === "AGM" && (
-                              <Button size="sm" onClick={() => updateCustomerStatus(c.customer_id, "approved_by_agm")}>Approve</Button>
-                            )}
-                            <Button variant="destructive" size="sm" onClick={() => deleteCustomer(c.customer_id)}>Delete</Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-muted-foreground">No records found.</p>
-              )}
-            </CardContent>
-          </Card>
-        )}
+    col1, col2 = st.columns([1, 1], gap="large")
 
-        {/* Admin Settings */}
-        {activePage === "Admin Settings" && currentUser?.role === "admin" && (
-          <Card>
-            <CardHeader><CardTitle>Admin Settings</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="dashboard-text">Dashboard Text</Label>
-                <Textarea
-                  id="dashboard-text"
-                  value={dashboardContent.text}
-                  onChange={(e) =>
-                    setDashboardContent({ ...dashboardContent, text: e.target.value })
-                  }
-                  placeholder="Enter dashboard welcome text"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="dashboard-image">Dashboard Image</Label>
-                <Input
-                  id="dashboard-image"
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const url = URL.createObjectURL(file);
-                      setDashboardContent({ ...dashboardContent, image_path: url });
-                    }
-                  }}
-                />
-              </div>
-              <Button onClick={() => alert("Dashboard content updated successfully")}>
-                Update Dashboard
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-      </main>
-    </div>
-  );
-};
+    with col1:
+        st.markdown('<div class="login-container"><div class="login-card">', unsafe_allow_html=True)
+        st.markdown('<div class="login-header">🔐 Sign In</div>', unsafe_allow_html=True)
 
-export default CRMApp;
+        # Native Streamlit inputs for login
+        username = st.text_input("👤 Username", placeholder="Enter username", help="Default: ASHIK",
+                                 key="login_username")
+        password = st.text_input("🔒 Password", type="password", placeholder="Enter password", help="Default: ASHph7#",
+                                 key="login_password")
+
+        if st.button("🚀 Sign In", key="login_btn"):
+            db_now = load_data()
+            if username in db_now["users"]:
+                user_data = db_now["users"][username]
+                if check_password(password, user_data["password"]):
+                    st.session_state.logged_in = True
+                    st.session_state.user = user_data
+                    st.success(f"✅ Welcome, {username}!")
+                    st.experimental_rerun()
+                else:
+                    st.error("❌ Invalid password. Please try again.")
+            else:
+                st.error("❌ Username not found. Please check and try again.")
+
+        st.markdown('<div class="hint-text">Default credentials: ASHIK / ASHph7#</div>', unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div class="dashboard-panel">', unsafe_allow_html=True)
+        st.markdown('<h3 style="color: #1e293b; margin-bottom: 1rem;">CRM System</h3>', unsafe_allow_html=True)
+
+        if dashboard_img and os.path.exists(dashboard_img):
+            st.image(dashboard_img, use_column_width=True)
+
+        st.markdown(f'<div class="dashboard-text">{dashboard_text}</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color: #94a3b8; font-size: 14px;">Secure customer relationship management platform</p>',
+                    unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ---------------------------
+# REPORTS PAGE (Updated Icons and Layout)
+# ---------------------------
+def reports_page(db):
+    """
+    Display charts & stats. This function uses st.session_state.user if needed for role-based behavior.
+    """
+    st.header("📊 Reports & Analytics")
+    customers = list(db["customers"].values())
+    users = list(db["users"].values())
+    user = st.session_state.user  # Use current logged-in user
+
+    # Container for reports
+    col1, col2 = st.columns(2, gap="large")
+
+    with col1:
+        st.subheader("🏢 Branch-wise Customer Distribution")
+        branch_counts = {}
+        for c in customers:
+            branch = c.get("branch", "Unassigned")
+            branch_counts[branch] = branch_counts.get(branch, 0) + 1
+        if branch_counts:
+            fig, ax = plt.subplots(figsize=(8, 5))
+            bars = ax.bar(list(branch_counts.keys()), list(branch_counts.values()),
+                          edgecolor='white', linewidth=1.5)
+            ax.set_title("Branch-wise Customer Count", fontsize=14, fontweight='bold', pad=20)
+            ax.set_ylabel("Number of Customers", fontsize=12)
+            ax.set_xlabel("Branch", fontsize=12)
+            ax.tick_params(axis="x", rotation=45)
+            # Add value labels
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width() / 2., height + 0.05,
+                        f'{int(height)}', ha='center', va='bottom', fontweight='bold')
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.info("📋 No customer data available for branch-wise analysis.")
+
+    with col2:
+        st.subheader("📈 Customer Status Distribution")
+        status_counts = {}
+        for c in customers:
+            status = c.get("status", "submitted")
+            status_counts[status] = status_counts.get(status, 0) + 1
+        if status_counts:
+            labels = [status_labels.get(k, (k.title(), "#94a3b8"))[0] for k in status_counts.keys()]
+            colors = [status_labels.get(k, (k.title(), "#94a3b8"))[1] for k in status_counts.keys()]
+            fig, ax = plt.subplots(figsize=(8, 6))
+            wedges, texts, autotexts = ax.pie(
+                list(status_counts.values()),
+                labels=labels,
+                autopct='%1.1f%%',
+                startangle=90,
+                explode=(0.05,) * len(status_counts)
+            )
+            ax.axis("equal")
+            ax.set_title("Customer Status Distribution", fontsize=14, fontweight='bold', pad=20)
+            plt.setp(autotexts, size=10, weight="bold")
+            st.pyplot(fig)
+        else:
+            st.info("📋 No customer data available for status analysis.")
+
+        # Role-wise user count (moved outside columns for proper layout)
+        st.subheader("👥 User Role Distribution")
+        role_counts = {}
+        for u in users:
+            role = u.get("role", "branch")
+            role_counts[role] = role_counts.get(role, 0) + 1
+        if role_counts:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            bars = ax.bar(role_counts.keys(), role_counts.values(), edgecolor='white', linewidth=1.5)
+            ax.set_title("Role-wise User Count", fontsize=14, fontweight='bold', pad=20)
+            ax.set_ylabel("Number of Users", fontsize=12)
+            ax.set_xlabel("Role", fontsize=12)
+            # Add value labels
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width() / 2., height + 0.05,
+                        f'{int(height)}', ha='center', va='bottom', fontweight='bold')
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.info("👥 No user data available for role analysis.")
+
+
+# ---------------------------
+# Page functions that were referenced but not defined earlier.
+# These reuse logic from your original big block (kept semantics).
+# ---------------------------
+def create_agm_page(user, db):
+    st.header("👥 Create New AGM")
+    new_username = st.text_input("AGM Username", placeholder="Enter unique username", key="create_agm_username")
+    new_password = st.text_input("AGM Password", type="password",
+                                 placeholder="Enter secure password (min 6 chars)", key="create_agm_password")
+    if st.button("✅ Create AGM", key="create_agm_btn"):
+        if not new_username:
+            st.error("❌ Username is required")
+        elif new_username in db["users"]:
+            st.error("❌ Username already exists")
+        elif len(new_password) < 6:
+            st.error("❌ Password must be at least 6 characters")
+        else:
+            db["users"][new_username] = {
+                "username": new_username,
+                "password": hash_password(new_password),
+                "role": "AGM",
+                "assigned_branches": [],
+                "created_by": user["username"],
+                "created_at": str(datetime.now())
+            }
+            if save_data(db):
+                st.success("✅ AGM created successfully!")
+                st.experimental_rerun()
+
+
+def create_area_manager_page(user, db):
+    st.header("👥 Create New Area Manager")
+    am_username = st.text_input("Area Manager Username", placeholder="Enter unique username", key="am_username")
+    am_password = st.text_input("Password", type="password", placeholder="Enter secure password (min 6 chars)",
+                                key="am_password")
+    am_branches = st.text_input("Assign Branches (comma-separated)", placeholder="e.g., Branch A, Branch B",
+                                key="am_branches")
+    if st.button("✅ Create Area Manager", key="am_create_btn"):
+        if not am_username:
+            st.error("❌ Username is required")
+        elif am_username in db["users"]:
+            st.error("❌ Username already exists")
+        elif len(am_password) < 6:
+            st.error("❌ Password must be at least 6 characters")
+        else:
+            branches = [b.strip() for b in am_branches.split(",") if b.strip()]
+            db["users"][am_username] = {
+                "username": am_username,
+                "password": hash_password(am_password),
+                "role": "area_manager",
+                "assigned_branches": branches,
+                "created_by": user["username"],
+                "created_at": str(datetime.now())
+            }
+            if save_data(db):
+                st.success("✅ Area Manager created successfully!")
+                st.experimental_rerun()
+
+
+def create_branch_user_page(user, db):
+    st.header("👥 Create New Branch User")
+    bu_username = st.text_input("Branch User Username", placeholder="Enter unique username", key="bu_username")
+    bu_password = st.text_input("Password", type="password", placeholder="Enter secure password (min 6 chars)",
+                                key="bu_password")
+    if user["role"] == "area_manager":
+        bu_branch = st.selectbox("Assign Branch", options=[""] + user.get("assigned_branches", []), key="bu_branch_select")
+    else:
+        bu_branch = st.text_input("Assign Branch", placeholder="Enter branch name", key="bu_branch_input")
+    if st.button("✅ Create Branch User", type="primary", key="bu_create_btn"):
+        if not bu_username:
+            st.error("❌ Username is required")
+        elif bu_username in db["users"]:
+            st.error("❌ Username already exists")
+        elif len(bu_password) < 6:
+            st.error("❌ Password must be at least 6 characters")
+        elif not bu_branch:
+            st.error("❌ Branch assignment is required")
+        else:
+            db["users"][bu_username] = {
+                "username": bu_username,
+                "password": hash_password(bu_password),
+                "role": "branch",
+                "assigned_branches": [bu_branch.strip()],
+                "created_by": user["username"],
+                "created_at": str(datetime.now())
+            }
+            if save_data(db):
+                st.success("✅ Branch User created successfully!")
+                st.experimental_rerun()
+
+
+def submit_customer_page(user, db):
+    st.header("📝 Submit New Customer")
+    col1, col2 = st.columns(2)
+    with col1:
+        name = st.text_input("👤 Customer Name", placeholder="Enter full name", help="Full name of the customer",
+                             key="cust_name")
+        phone = st.text_input("📞 Phone Number", placeholder="10 digits", max_chars=10,
+                              help="Enter 10-digit phone number", key="cust_phone")
+    with col2:
+        aadhaar = st.text_input("🆔 Aadhaar Number", placeholder="12 digits", max_chars=12,
+                                help="Enter 12-digit Aadhaar number", key="cust_aadhaar")
+        email = st.text_input("📧 Email (optional)", placeholder="Enter email address", key="cust_email")
+
+    file = st.file_uploader("📎 Upload Supporting Document", type=["pdf", "jpg", "png", "jpeg"],
+                            help="Upload customer document (PDF/Image)", key="cust_file")
+
+    if st.button("✅ Submit Customer", type="primary", use_container_width=True, key="submit_customer_btn"):
+        branch = user["assigned_branches"][0] if user.get("assigned_branches") else "Unassigned"
+        if not name or not phone or not aadhaar or not file:
+            st.error("❌ All required fields (Name, Phone, Aadhaar, Document) must be provided")
+        elif not phone.isdigit() or len(phone) != 10:
+            st.error("❌ Phone number must be exactly 10 digits")
+        elif not aadhaar.isdigit() or len(aadhaar) != 12:
+            st.error("❌ Aadhaar number must be exactly 12 digits")
+        else:
+            try:
+                cid = generate_customer_id()
+                fpath = os.path.join(UPLOAD_DIR, f"{cid}_{file.name}")
+                with open(fpath, "wb") as f:
+                    f.write(file.getbuffer())
+                db["customers"][cid] = {
+                    "customer_id": cid,
+                    "name": name,
+                    "phone": phone,
+                    "aadhaar_number": aadhaar,
+                    "email": email or "",
+                    "branch": branch,
+                    "submitted_by": user["username"],
+                    "status": "submitted",
+                    "document_path": fpath,
+                    "created_at": str(datetime.now()),
+                    "updated_at": str(datetime.now())
+                }
+                if save_data(db):
+                    st.success(f"✅ Customer {cid} submitted successfully! Status: {status_labels['submitted'][0]}")
+                    st.experimental_rerun()
+            except Exception as e:
+                st.error(f"❌ Error submitting customer: {str(e)}")
+
+
+def view_records_page(user, db):
+    st.header("📂 Customer Records")
+    search = st.text_input("🔍 Search by Name, ID, or Phone", placeholder="Enter search term", key="record_search")
+
+    # Filter customers based on role
+    all_customers = list(db["customers"].values())
+    customers = all_customers.copy()
+
+    if user["role"] == "branch":
+        customers = [c for c in customers if c["submitted_by"] == user["username"]]
+    elif user["role"] == "area_manager":
+        customers = [c for c in customers if c["branch"] in user.get("assigned_branches", [])]
+    # For AGM and admin: show all
+
+    if search:
+        customers = [c for c in customers if
+                     search.lower() in c["name"].lower() or
+                     search.lower() in c["customer_id"].lower() or
+                     search.lower() in c.get("phone", "").lower()]
+
+    if not customers:
+        st.info("📋 No customer records found matching the criteria.")
+        return
+
+    # Display customers in expanders
+    for c in customers:
+        with st.expander(
+                f"🆔 {c['customer_id']} | 👤 {c['name']} | 📞 {c.get('phone', 'N/A')} | 🏢 {c.get('branch', 'Unassigned')}",
+                expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**📧 Email:** {c.get('email', 'N/A')}")
+                st.write(f"**👤 Submitted By:** {c.get('submitted_by', 'N/A')}")
+                st.write(f"**📅 Created:** {c.get('created_at', 'N/A')}")
+                st.write(f"**🔄 Updated:** {c.get('updated_at', 'N/A')}")
+
+            with col2:
+                status_label, status_color = status_labels.get(c["status"], (c["status"].title(), "#94a3b8"))
+                st.markdown(
+                    f"**📊 Status:** <span style='color:{status_color}; font-weight:bold;'>{status_label}</span>",
+                    unsafe_allow_html=True)
+
+            # Document download
+            doc = c.get("document_path")
+            if doc and os.path.exists(doc):
+                with open(doc, "rb") as fobj:
+                    st.download_button(
+                        label="📄 Download Document",
+                        data=fobj,
+                        file_name=os.path.basename(doc),
+                        mime="application/octet-stream"
+                    )
+            else:
+                st.warning("⚠️ Document not found or inaccessible.")
+
+            # Approval actions
+            if c["status"] == "submitted" and user["role"] == "area_manager" and c["branch"] in user.get(
+                    "assigned_branches", []):
+                col_approve, col_space = st.columns([1, 3])
+                with col_approve:
+                    if st.button(f"✅ Approve as Area Manager", key=f"approve_am_{c['customer_id']}"):
+                        c["status"] = "approved_by_area_manager"
+                        c["updated_at"] = str(datetime.now())
+                        db["customers"][c["customer_id"]] = c
+                        if save_data(db):
+                            st.success(f"✅ {c['customer_id']} approved by Area Manager!")
+                            st.experimental_rerun()
+
+            if c["status"] == "approved_by_area_manager" and user["role"] == "AGM":
+                col_approve, col_space = st.columns([1, 3])
+                with col_approve:
+                    if st.button(f"✅ Approve as AGM", key=f"approve_agm_{c['customer_id']}"):
+                        c["status"] = "approved_by_agm"
+                        c["updated_at"] = str(datetime.now())
+                        db["customers"][c["customer_id"]] = c
+                        if save_data(db):
+                            st.success(f"✅ {c['customer_id']} approved by AGM!")
+                            st.experimental_rerun()
+
+            # Admin delete
+            if user["role"] == "admin":
+                col_delete, col_space = st.columns([1, 3])
+                with col_delete:
+                    if st.button(f"🗑️ Delete", key=f"delete_{c['customer_id']}"):
+                        try:
+                            if c.get("document_path") and os.path.exists(c["document_path"]):
+                                os.remove(c["document_path"])
+                            del db["customers"][c["customer_id"]]
+                            if save_data(db):
+                                st.warning(f"⚠️ {c['customer_id']} deleted successfully!")
+                                st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error deleting: {str(e)}")
+
+
+def settings_page(user, db):
+    st.header("⚙️ Admin Settings")
+    st.subheader("Dashboard Configuration")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        dashboard_text = st.text_area(
+            "Dashboard Welcome Text",
+            value=db["dashboard"].get("text", "Welcome to CRM System. Please login to continue."),
+            height=100,
+            help="Customize the message shown on the login page",
+            key="settings_dashboard_text"
+        )
+    with col2:
+        dashboard_img = st.file_uploader("Upload Dashboard Image", type=["png", "jpg", "jpeg"],
+                                         key="settings_dashboard_img")
+        if dashboard_img:
+            st.image(dashboard_img, caption="Preview", use_column_width=True)
+
+    if st.button("💾 Update Dashboard", type="primary", key="update_dashboard_btn"):
+        db["dashboard"]["text"] = dashboard_text
+        if dashboard_img:
+            img_path = os.path.join(UPLOAD_DIR, f"dashboard_{int(datetime.now().timestamp())}.jpg")
+            with open(img_path, "wb") as f:
+                f.write(dashboard_img.getbuffer())
+            db["dashboard"]["image_path"] = img_path
+        if save_data(db):
+            st.success("✅ Dashboard settings updated successfully!")
+            st.experimental_rerun()
+
+    st.subheader("📈 System Stats")
+    total_customers = len(db["customers"])
+    total_users = len(db["users"])
+    col_stats1, col_stats2, col_stats3 = st.columns(3)
+    with col_stats1:
+        st.metric("👥 Total Users", total_users)
+    with col_stats2:
+        st.metric("📊 Total Customers", total_customers)
+    with col_stats3:
+        pending = len([c for c in db["customers"].values() if c["status"] == "submitted"])
+        st.metric("⏳ Pending Approvals", pending)
+
+
+# ---------------------------
+# MAIN / DASHBOARD ROUTER
+# ---------------------------
+def dashboard():
+    user = st.session_state.user
+    db_local = load_data()
+
+    # Sidebar with logout and user info
+    with st.sidebar:
+        st.markdown(f"<h2>👤 {user['username']}</h2>", unsafe_allow_html=True)
+        if st.button("🚪 Logout", key="logout_btn"):
+            st.session_state.logged_in = False
+            st.session_state.user = None
+            st.experimental_rerun()
+
+    # Build menu options depending on role
+    if user["role"] == "admin":
+        menu = ["👥 Create AGM", "👥 Create Area Manager", "👥 Create Branch User", "📂 View Records", "⚙️ Settings",
+                "📊 Reports"]
+    elif user["role"] == "area_manager":
+        menu = ["👥 Create Branch User", "📂 View Records", "📊 Reports"]
+    elif user["role"] == "branch":
+        menu = ["📝 Submit Customer", "📂 View Records", "📊 Reports"]
+    elif user["role"] == "AGM":
+        menu = ["📂 View Records", "📊 Reports"]
+    else:
+        menu = ["📂 View Records", "📊 Reports"]
+
+    choice = st.sidebar.radio("📋 Navigation", menu, key="main_menu_radio")
+
+    # Route pages
+    if choice == "📊 Reports":
+        reports_page(db_local)
+    elif choice == "📝 Submit Customer":
+        submit_customer_page(user, db_local)
+    elif choice == "📂 View Records":
+        view_records_page(user, db_local)
+    elif choice == "⚙️ Settings" and user["role"] == "admin":
+        settings_page(user, db_local)
+    elif choice == "👥 Create AGM" and user["role"] == "admin":
+        create_agm_page(user, db_local)
+    elif choice == "👥 Create Area Manager" and user["role"] == "admin":
+        create_area_manager_page(user, db_local)
+    elif choice == "👥 Create Branch User" and user["role"] in ["admin", "area_manager"]:
+        create_branch_user_page(user, db_local)
+    else:
+        st.info("Select a page from the sidebar.")
+
+
+# ---------------------------
+# MAIN EXECUTION BLOCK (Router for Login/Dashboard)
+# ---------------------------
+def main():
+    if not st.session_state.logged_in:
+        login_page()
+    else:
+        dashboard()
+
+
+if __name__ == "__main__":
+    main()
