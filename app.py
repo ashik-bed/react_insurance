@@ -217,6 +217,9 @@ def apply_custom_css():
 
 apply_custom_css()
 
+
+#/--------Login-------/
+
 def login_page():
     db_local = load_data()  # Fresh load
 
@@ -250,6 +253,11 @@ def login_page():
             height: 100%;
             margin: 0 1rem;
         }
+        /* Reduce input width for login page */
+        .login-input input {
+            width: 250px !important;  /* Adjust as needed */
+            max-width: 100%;
+        }
         </style>
         """,
         unsafe_allow_html=True
@@ -263,10 +271,12 @@ def login_page():
     # LEFT: LOGIN
     with col1:
         st.markdown('<div class="login-header">🔐 Sign In</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-input">', unsafe_allow_html=True)
         username = st.text_input("👤 Username", placeholder="Enter username", key="login_username")
         password = st.text_input("🔒 Password", type="password", placeholder="Enter password", key="login_password")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        if st.button("🚀 Sign In", key="login_btn"):
+        if st.button("Sign In", key="login_btn"):
             db_now = load_data()
             if username in db_now["users"]:
                 user_data = db_now["users"][username]
@@ -282,8 +292,7 @@ def login_page():
 
     # DIVIDER
     with col_div:
-        st.markdown('<div class="divider" style="height: 400px;"></div>',
-                    unsafe_allow_html=True)  # adjust 400px to match card height
+        st.markdown('<div class="divider" style="height: 400px;"></div>', unsafe_allow_html=True)
 
     # RIGHT: DASHBOARD
     with col2:
@@ -633,8 +642,19 @@ def settings_page(user, db):
     with col2:
         dashboard_img = st.file_uploader("Upload Dashboard Image", type=["png", "jpg", "jpeg"],
                                          key="settings_dashboard_img")
-        if dashboard_img:
-            st.image(dashboard_img, caption="Preview", use_column_width=True)
+        # Preview current image if exists
+        if db["dashboard"].get("image_path") and os.path.exists(db["dashboard"]["image_path"]):
+            st.image(db["dashboard"]["image_path"], caption="Current Dashboard Image", use_column_width=True)
+            # Add delete button
+            if st.button("🗑️ Delete Dashboard Image", key="delete_dashboard_img"):
+                try:
+                    os.remove(db["dashboard"]["image_path"])
+                except Exception as e:
+                    st.error(f"❌ Could not delete image: {str(e)}")
+                db["dashboard"]["image_path"] = None
+                if save_data(db):
+                    st.success("✅ Dashboard image deleted successfully!")
+                    st.experimental_rerun()
 
     if st.button("💾 Update Dashboard", type="primary", key="update_dashboard_btn"):
         db["dashboard"]["text"] = dashboard_text
@@ -659,7 +679,6 @@ def settings_page(user, db):
         pending = len([c for c in db["customers"].values() if c["status"] == "submitted"])
         st.metric("⏳ Pending Approvals", pending)
 
-
 # ---------------------------
 # MAIN / DASHBOARD ROUTER
 # ---------------------------
@@ -667,24 +686,112 @@ def dashboard():
     user = st.session_state.user
     db_local = load_data()
 
-    # Sidebar with logout and user info
+    # Sidebar with username and logout icon
     with st.sidebar:
-        st.markdown(f"<h2>👤 {user['username']}</h2>", unsafe_allow_html=True)
-        if st.button("🚪 Logout", key="logout_btn"):
+        st.markdown(
+            """
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+            <style>
+            .sidebar-user {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1rem;
+            }
+            .sidebar-user h2 {
+                margin: 0;
+                font-size: 1.2rem;
+            }
+            .logout-icon button {
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: 1.5rem;
+                color: #1e293b;
+                padding: 0;
+            }
+            .logout-icon button:hover {
+                color: #ef4444;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # Layout with columns
+        cols = st.columns([6, 1])
+
+        # Username
+        with cols[0]:
+            st.markdown(f"<h2 style='margin:0;'>👤 {user['username']}</h2>", unsafe_allow_html=True)
+
+        # Logout icon as button
+        with cols[1]:
+            if st.button("➜", key="logout_btn", help="Logout"):
+                st.session_state.logged_in = False
+                st.session_state.user = None
+                st.experimental_rerun()
+
+            # Replace button text with Font Awesome icon
+            st.markdown(
+                """
+                <style>
+                button#logout_btn {
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    font-size: 1.5rem;
+                    color: #1e293b;
+                }
+                button#logout_btn:hover {
+                    color: #ef4444;
+                }
+                </style>
+                <script>
+                const btn = window.parent.document.querySelector('button#logout_btn');
+                if(btn){ btn.innerHTML = '<i class="fa-regular fa-right-from-bracket"></i>'; }
+                </script>
+                """,
+                unsafe_allow_html=True
+            )
+
+        # Hidden input to detect logout click
+        if "logout_flag" not in st.session_state:
+            st.session_state.logout_flag = 0
+        # Trigger logout
+        if st.session_state.logout_flag == 1:
             st.session_state.logged_in = False
             st.session_state.user = None
             st.experimental_rerun()
 
     # Build menu options depending on role
     if user["role"] == "admin":
-        menu = ["👥 Create AGM", "👥 Create Area Manager", "👥 Create Branch User", "📂 View Records", "⚙️ Settings",
-                "📊 Reports"]
-    elif user["role"] == "area_manager":
-        menu = ["👥 Create Branch User", "📂 View Records", "📊 Reports"]
-    elif user["role"] == "branch":
-        menu = ["📝 Submit Customer", "📂 View Records", "📊 Reports"]
+        menu = [
+            "👥 Create AGM",
+            "👥 Create Area Manager",
+            "👥 Create Branch User",
+            "📂 View Records",
+            "⚙️ Settings",
+            "📊 Reports"
+        ]
     elif user["role"] == "AGM":
-        menu = ["📂 View Records", "📊 Reports"]
+        menu = [
+            "👥 Create Area Manager",  # AGM can create Area Managers
+            "📂 View Records",
+            "📊 Reports"
+        ]
+    elif user["role"] == "area_manager":
+        menu = [
+            "👥 Create Branch User",  # Area Manager can create Branch Users in their branches
+            "📂 View Records",
+            "📊 Reports"
+        ]
+    elif user["role"] == "branch":
+        menu = [
+            "📝 Submit Customer",
+            "📂 View Records",
+            "📊 Reports"
+        ]
     else:
         menu = ["📂 View Records", "📊 Reports"]
 
@@ -701,13 +808,12 @@ def dashboard():
         settings_page(user, db_local)
     elif choice == "👥 Create AGM" and user["role"] == "admin":
         create_agm_page(user, db_local)
-    elif choice == "👥 Create Area Manager" and user["role"] == "admin":
+    elif choice == "👥 Create Area Manager" and user["role"] in ["admin", "AGM"]:
         create_area_manager_page(user, db_local)
     elif choice == "👥 Create Branch User" and user["role"] in ["admin", "area_manager"]:
         create_branch_user_page(user, db_local)
     else:
         st.info("Select a page from the sidebar.")
-
 
 # ---------------------------
 # MAIN EXECUTION BLOCK (Router for Login/Dashboard)
