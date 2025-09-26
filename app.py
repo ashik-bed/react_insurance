@@ -18,46 +18,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ---------------------------
-# DEBUG
-# ---------------------------
-DEBUG = True
-if DEBUG:
-    st.info("🔧 Debug: Login page loaded in login pager")
 
-# ---------------------------
-# LOGIN PAGE (example layout)
-# ---------------------------
-col1, col2 = st.columns([1, 1], gap="large")
-
-with col1:
-    st.markdown("## 🔒 Sign In")   # keep login page look with lock icon
-    username = st.text_input("Username", placeholder="Enter username")
-    password = st.text_input("Password", type="password", placeholder="Enter password")
-    st.button("Sign In")
-
-with col2:
-    st.markdown("## CRM System")
-    st.write("Welcome to CRM System. Please login to continue.")
-    st.caption("Secure customer relationship management platform")
-
-# ---------------------------
-# REST OF YOUR FUNCTIONS / LOGIC
-# ---------------------------
-# (no need to touch them — they will work as before)
-
-# ---------------------------
 # CONFIG
 # ---------------------------
 DATA_FILE = "crm_data.json"
 UPLOAD_DIR = "uploads"
 
-st.set_page_config(
-    page_title="CRM System",
-    page_icon="💼",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # ---------------------------
 # HELPERS
@@ -251,104 +217,54 @@ def apply_custom_css():
 
 apply_custom_css()
 
-# ---------------------------
-# LOGIN PAGE (Fixed: Native Streamlit Login, Professional Light Design)
-# ---------------------------
 def login_page():
-    # Debug: Confirm function runs
-    st.write("Debug: Login page loaded")  # Remove after testing
-
     db_local = load_data()  # Fresh load
 
-    dashboard_text = db_local["dashboard"].get("text", "Welcome to CRM System. Please login to continue.")
+    dashboard_text = db_local["dashboard"].get(
+        "text", "Welcome to CRM System. Please login to continue."
+    )
     dashboard_img = db_local["dashboard"].get("image_path", "")
 
-    # Professional light login layout
+    # Custom styles
     st.markdown(
         """
         <style>
-        .login-container {
-            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem;
-        }
-        .login-card {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            padding: 3rem;
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
-        }
         .login-header {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 1.5rem;
             color: #1e293b;
-            font-size: 1.75rem;
-            font-weight: 700;
-            margin-bottom: 2rem;
-        }
-        .login-btn {
-            width: 100%;
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 1rem;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-top: 1rem;
-        }
-        .login-btn:hover {
-            background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-        }
-        .hint-text {
-            color: #64748b;
-            font-size: 14px;
-            margin-top: 1rem;
-        }
-        .dashboard-panel {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            padding: 3rem;
-            width: 100%;
-            max-width: 500px;
-            height: 400px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
         }
         .dashboard-text {
             color: #475569;
-            font-size: 16px;
-            line-height: 1.6;
+            font-size: 15px;
             margin: 1rem 0;
+        }
+        /* Add spacing at top */
+        .top-space {
+            margin-top: 50px;
+        }
+        /* Divider line */
+        .divider {
+            border-left: 2px solid #e2e8f0;
+            height: 100%;
+            margin: 0 1rem;
         }
         </style>
         """,
         unsafe_allow_html=True
     )
 
-    col1, col2 = st.columns([1, 1], gap="large")
+    # Add top space
+    st.markdown('<div class="top-space"></div>', unsafe_allow_html=True)
 
+    col1, col_div, col2 = st.columns([1, 0.02, 3], gap="large")  # thinner divider
+
+    # LEFT: LOGIN
     with col1:
-        st.markdown('<div class="login-container"><div class="login-card">', unsafe_allow_html=True)
         st.markdown('<div class="login-header">🔐 Sign In</div>', unsafe_allow_html=True)
-
-        # Native Streamlit inputs for login
-        username = st.text_input("👤 Username", placeholder="Enter username", help="Default: ASHIK",
-                                 key="login_username")
-        password = st.text_input("🔒 Password", type="password", placeholder="Enter password", help="Default: ASHph7#",
-                                 key="login_password")
+        username = st.text_input("👤 Username", placeholder="Enter username", key="login_username")
+        password = st.text_input("🔒 Password", type="password", placeholder="Enter password", key="login_password")
 
         if st.button("🚀 Sign In", key="login_btn"):
             db_now = load_data()
@@ -357,27 +273,25 @@ def login_page():
                 if check_password(password, user_data["password"]):
                     st.session_state.logged_in = True
                     st.session_state.user = user_data
-                    st.success(f"✅ Welcome, {username}!")
+                    st.toast(f"✅ Welcome, {username}!", icon="🎉")
                     st.experimental_rerun()
                 else:
-                    st.error("❌ Invalid password. Please try again.")
+                    st.error("❌ Invalid password.")
             else:
-                st.error("❌ Username not found. Please check and try again.")
+                st.error("❌ Username not found.")
 
-        st.markdown('<div class="hint-text">Default credentials: ASHIK / ASHph7#</div>', unsafe_allow_html=True)
-        st.markdown('</div></div>', unsafe_allow_html=True)
+    # DIVIDER
+    with col_div:
+        st.markdown('<div class="divider" style="height: 400px;"></div>',
+                    unsafe_allow_html=True)  # adjust 400px to match card height
 
+    # RIGHT: DASHBOARD
     with col2:
-        st.markdown('<div class="dashboard-panel">', unsafe_allow_html=True)
-        st.markdown('<h3 style="color: #1e293b; margin-bottom: 1rem;">CRM System</h3>', unsafe_allow_html=True)
-
+        st.subheader("CRM System")
         if dashboard_img and os.path.exists(dashboard_img):
             st.image(dashboard_img, use_column_width=True)
-
         st.markdown(f'<div class="dashboard-text">{dashboard_text}</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color: #94a3b8; font-size: 14px;">Secure customer relationship management platform</p>',
-                    unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.caption("Secure customer relationship management platform")
 
 
 # ---------------------------
@@ -685,6 +599,7 @@ def view_records_page(user, db):
                         if save_data(db):
                             st.success(f"✅ {c['customer_id']} approved by AGM!")
                             st.experimental_rerun()
+
 
             # Admin delete
             if user["role"] == "admin":
